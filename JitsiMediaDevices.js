@@ -141,7 +141,7 @@ class JitsiMediaDevices {
                 // Triggering device list update when the permissiions are granted in order to update
                 // the labels the devices.
                 // eslint-disable-next-line no-empty-function
-                this.enumerateDevices(() => {});
+                this.enumerateDevices(() => { });
             }
         }
     }
@@ -221,25 +221,25 @@ class JitsiMediaDevices {
                 switch (type) {
                 case MediaType.VIDEO:
                     promises.push(
-                        navigator.permissions.query({
-                            name: VIDEO_PERMISSION_NAME
-                        }));
+                            navigator.permissions.query({
+                                name: VIDEO_PERMISSION_NAME
+                            }));
                     break;
                 case MediaType.AUDIO:
                     promises.push(
-                        navigator.permissions.query({
-                            name: AUDIO_PERMISSION_NAME
-                        }));
+                            navigator.permissions.query({
+                                name: AUDIO_PERMISSION_NAME
+                            }));
                     break;
                 default:
                     promises.push(
-                        navigator.permissions.query({
-                            name: VIDEO_PERMISSION_NAME
-                        }));
+                            navigator.permissions.query({
+                                name: VIDEO_PERMISSION_NAME
+                            }));
                     promises.push(
-                        navigator.permissions.query({
-                            name: AUDIO_PERMISSION_NAME
-                        }));
+                            navigator.permissions.query({
+                                name: AUDIO_PERMISSION_NAME
+                            }));
                 }
 
                 Promise.all(promises).then(
