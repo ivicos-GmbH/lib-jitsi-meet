@@ -38,7 +38,6 @@ jobs:
       with:
         node-version: '12.x'
     - run: npm install
-    - run: npm run build
     - run: npm run lint
   publish_dry_run:
     name: Testing and assessing publication to NPM (dry run)
@@ -49,7 +48,7 @@ jobs:
       with:
         node-version: '12.x'
     - run: npm install
-    - run: npm test
+    - run: npm run test
     - uses: JS-DevTools/npm-publish@v1
       with:
         token: ${{ secrets.NPM_TOKEN }}
