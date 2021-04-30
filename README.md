@@ -1,5 +1,9 @@
 # Jitsi Meet API library
 
+## Notes
+
+The repository has been forked from https://github.com/jitsi/lib-jitsi-meet and adapted to the need for a custom Jitsi Meet implementation. The additional configuration and changes made regarding Ivicos custom Jitsi Meet implementation can be found in USAGE.md. The original documentation from the forked repository is accessible below.
+
 You can use Jitsi Meet API to create Jitsi Meet video conferences with a custom GUI.
 
 ## Installation
