@@ -110,6 +110,8 @@ export default class TrackVADEmitter extends EventEmitter {
         // with audio worklet when it's mature enough and has more browser support.
         // We don't need stereo for determining the VAD score so we create a single channel processing node.
         this._audioProcessingNode = this._audioContext.createScriptProcessor(this._procNodeSampleRate, 1, 1);
+        this.gainNode = new GainNode(this._audioContext);
+        this.gainNode.gain.setTargetAtTime(0, this._audioContext.currentTime, 0.2);
     }
 
     /**
@@ -156,7 +158,8 @@ export default class TrackVADEmitter extends EventEmitter {
     _connectAudioGraph() {
         this._audioProcessingNode.onaudioprocess = this._onAudioProcess;
         this._audioSource.connect(this._audioProcessingNode);
-        this._audioProcessingNode.connect(this._audioContext.destination);
+        this._audioProcessingNode.connect(this.gainNode);
+        this.gainNode.connect(this._audioContext.destination);
     }
 
     /**
