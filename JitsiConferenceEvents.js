@@ -98,6 +98,11 @@ export const DTMF_SUPPORT_CHANGED = 'conference.dtmfSupportChanged';
 export const ENDPOINT_MESSAGE_RECEIVED = 'conference.endpoint_message_received';
 
 /**
+ * Indicates that a message for the remote endpoint statistics has been received on the bridge channel.
+ */
+export const ENDPOINT_STATS_RECEIVED = 'conference.endpoint_stats_received';
+
+/**
  * NOTE This is lib-jitsi-meet internal event and can be removed at any time !
  *
  * Event emitted when conference transits, between one to one and multiparty JVB
@@ -184,6 +189,12 @@ export const NO_AUDIO_INPUT = 'conference.no_audio_input';
  * Event indicates that the current microphone used by the conference is noisy.
  */
 export const NOISY_MIC = 'conference.noisy_mic';
+
+/**
+ * Indicates that a message from the local user or from the Prosody backend
+ * was received on the data channel.
+ */
+export const NON_PARTICIPANT_MESSAGE_RECEIVED = 'conference.non_participant_message_received';
 
 /**
  * New private text message was received.
@@ -365,3 +376,32 @@ export const LOBBY_USER_UPDATED = 'conference.lobby.userUpdated';
  * A user left the lobby room.
  */
 export const LOBBY_USER_LEFT = 'conference.lobby.userLeft';
+
+/**
+ * The local participant was approved to be able to unmute.
+ * @param {options} event - {
+ *     {MediaType} mediaType
+ * }.
+ */
+export const AV_MODERATION_APPROVED = 'conference.av_moderation.approved';
+
+/**
+ * AV Moderation was enabled/disabled. The actor is the participant that is currently in the meeting,
+ * or undefined if that participant has left the meeting.
+ *
+ * @param {options} event - {
+ *     {boolean} enabled,
+ *     {MediaType} mediaType,
+ *     {JitsiParticipant} actor
+ * }.
+ */
+export const AV_MODERATION_CHANGED = 'conference.av_moderation.changed';
+
+/**
+ * AV Moderation, report for user being approved to unmute.
+ * @param {options} event - {
+ *     {JitsiParticipant} participant,
+ *     {MediaType} mediaType
+ * }.
+ */
+export const AV_MODERATION_PARTICIPANT_APPROVED = 'conference.av_moderation.participant.approved';

@@ -5,6 +5,7 @@ import { Strophe } from 'strophe.js';
 
 import * as JitsiConferenceErrors from './JitsiConferenceErrors';
 import * as JitsiConferenceEvents from './JitsiConferenceEvents';
+import { SPEAKERS_AUDIO_LEVELS } from './modules/statistics/constants';
 import Statistics from './modules/statistics/statistics';
 import EventEmitterForwarder from './modules/util/EventEmitterForwarder';
 import * as MediaType from './service/RTC/MediaType';
@@ -74,6 +75,15 @@ JitsiConferenceEventManager.prototype.setupChatRoomListeners = function() {
         }
 
         // else: there are no DataChannels in P2P session (at least for now)
+    });
+
+    chatRoom.addListener(XMPPEvents.PARTICIPANT_FEATURES_CHANGED, (from, features) => {
+        const participant = conference.getParticipantById(Strophe.getResourceFromJid(from));
+
+        if (participant) {
+            participant.setFeatures(features);
+            conference.eventEmitter.emit(JitsiConferenceEvents.PARTCIPANT_FEATURES_CHANGED, participant);
+        }
     });
 
     chatRoom.addListener(
@@ -262,8 +272,8 @@ JitsiConferenceEventManager.prototype.setupChatRoomListeners = function() {
         (session, jid) => {
 
             if (jid) {
-                const participant = conference.getParticipantById(
-                    Strophe.getResourceFromJid(jid));
+                const resource = Strophe.getResourceFromJid(jid);
+                const participant = conference.getParticipantById(resource) || resource;
 
                 if (session.getStatus() === 'off') {
                     session.setTerminator(participant);
@@ -368,19 +378,19 @@ JitsiConferenceEventManager.prototype.setupChatRoomListeners = function() {
         XMPPEvents.MESSAGE_RECEIVED,
 
         // eslint-disable-next-line max-params
-        (jid, displayName, txt, myJid, ts) => {
+        (jid, txt, myJid, ts) => {
             const id = Strophe.getResourceFromJid(jid);
 
             conference.eventEmitter.emit(
                 JitsiConferenceEvents.MESSAGE_RECEIVED,
-                id, txt, ts, displayName);
+                id, txt, ts);
         });
 
     chatRoom.addListener(
         XMPPEvents.PRIVATE_MESSAGE_RECEIVED,
 
         // eslint-disable-next-line max-params
-        (jid, displayName, txt, myJid, ts) => {
+        (jid, txt, myJid, ts) => {
             const id = Strophe.getResourceFromJid(jid);
 
             conference.eventEmitter.emit(
@@ -411,10 +421,9 @@ JitsiConferenceEventManager.prototype.setupChatRoomListeners = function() {
                     JitsiConferenceEvents.ENDPOINT_MESSAGE_RECEIVED,
                     participant, payload);
             } else {
-                logger.warn(
-                    'Ignored XMPPEvents.JSON_MESSAGE_RECEIVED for not existing '
-                    + `participant: ${from}`,
-                    payload);
+                conference.eventEmitter.emit(
+                    JitsiConferenceEvents.NON_PARTICIPANT_MESSAGE_RECEIVED,
+                    id, payload);
             }
         });
 
@@ -496,6 +505,20 @@ JitsiConferenceEventManager.prototype.setupRTCListeners = function() {
                 conference.eventEmitter.emit(
                     JitsiConferenceEvents.DOMINANT_SPEAKER_CHANGED, dominant, previous);
 
+                if (previous && previous.length) {
+                    const speakerList = previous.slice(0);
+
+                    // Add the dominant speaker to the top of the list (exclude self).
+                    if (conference.myUserId !== dominant) {
+                        speakerList.splice(0, 0, dominant);
+                    }
+
+                    // Trim the list to the top 5 speakers only.
+                    if (speakerList.length > SPEAKERS_AUDIO_LEVELS) {
+                        speakerList.splice(SPEAKERS_AUDIO_LEVELS, speakerList.length - SPEAKERS_AUDIO_LEVELS);
+                    }
+                    conference.statistics && conference.statistics.setSpeakerList(speakerList);
+                }
                 if (conference.statistics && conference.myUserId() === dominant) {
                     // We are the new dominant speaker.
                     conference.statistics.sendDominantSpeakerEvent(conference.room.roomjid);
@@ -529,6 +552,17 @@ JitsiConferenceEventManager.prototype.setupRTCListeners = function() {
                     'Ignored ENDPOINT_MESSAGE_RECEIVED for not existing '
                         + `participant: ${from}`,
                     payload);
+            }
+        });
+
+    rtc.addListener(RTCEvents.ENDPOINT_STATS_RECEIVED,
+        (from, payload) => {
+            const participant = conference.getParticipantById(from);
+
+            if (participant) {
+                conference.eventEmitter.emit(JitsiConferenceEvents.ENDPOINT_STATS_RECEIVED, participant, payload);
+            } else {
+                logger.warn(`Ignoring ENDPOINT_STATS_RECEIVED for a non-existant participant: ${from}`);
             }
         });
 
@@ -607,11 +641,6 @@ JitsiConferenceEventManager.prototype.setupRTCListeners = function() {
 JitsiConferenceEventManager.prototype.removeXMPPListeners = function() {
     const conference = this.conference;
 
-    conference.xmpp.caps.removeListener(
-        XMPPEvents.PARTICIPANT_FEATURES_CHANGED,
-        this.xmppListeners[XMPPEvents.PARTICIPANT_FEATURES_CHANGED]);
-    delete this.xmppListeners[XMPPEvents.PARTICIPANT_FEATURES_CHANGED];
-
     Object.keys(this.xmppListeners).forEach(eventName => {
         conference.xmpp.removeListener(
             eventName,
@@ -626,18 +655,6 @@ JitsiConferenceEventManager.prototype.removeXMPPListeners = function() {
  */
 JitsiConferenceEventManager.prototype.setupXMPPListeners = function() {
     const conference = this.conference;
-
-    const featuresChangedListener = (from, features) => {
-        const participant = conference.getParticipantById(Strophe.getResourceFromJid(from));
-
-        if (participant) {
-            participant.setFeatures(features);
-            conference.eventEmitter.emit(JitsiConferenceEvents.PARTCIPANT_FEATURES_CHANGED, participant);
-        }
-    };
-
-    conference.xmpp.caps.addListener(XMPPEvents.PARTICIPANT_FEATURES_CHANGED, featuresChangedListener);
-    this.xmppListeners[XMPPEvents.PARTICIPANT_FEATURES_CHANGED] = featuresChangedListener;
 
     this._addConferenceXMPPListener(
         XMPPEvents.CALL_INCOMING,
@@ -681,6 +698,30 @@ JitsiConferenceEventManager.prototype.setupXMPPListeners = function() {
         createdTimestamp => {
             conference.eventEmitter.emit(JitsiConferenceEvents.CONFERENCE_CREATED_TIMESTAMP, createdTimestamp);
         });
+
+    this._addConferenceXMPPListener(XMPPEvents.AV_MODERATION_CHANGED,
+        (value, mediaType, actorJid) => {
+            const actorParticipant = conference.getParticipants().find(p => p.getJid() === actorJid);
+
+            conference.eventEmitter.emit(JitsiConferenceEvents.AV_MODERATION_CHANGED, {
+                enabled: value,
+                mediaType,
+                actor: actorParticipant
+            });
+        });
+    this._addConferenceXMPPListener(XMPPEvents.AV_MODERATION_PARTICIPANT_APPROVED,
+        (mediaType, jid) => {
+            const participant = conference.getParticipantById(Strophe.getResourceFromJid(jid));
+
+            if (participant) {
+                conference.eventEmitter.emit(JitsiConferenceEvents.AV_MODERATION_PARTICIPANT_APPROVED, {
+                    participant,
+                    mediaType
+                });
+            }
+        });
+    this._addConferenceXMPPListener(XMPPEvents.AV_MODERATION_APPROVED,
+        value => conference.eventEmitter.emit(JitsiConferenceEvents.AV_MODERATION_APPROVED, { mediaType: value }));
 };
 
 /**

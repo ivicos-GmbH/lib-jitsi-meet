@@ -175,6 +175,18 @@ export default class BridgeChannel {
     }
 
     /**
+     * Sends local stats via the bridge channel.
+     * @param {Object} payload The payload of the message.
+     * @throws NetworkError/InvalidStateError/Error if the operation fails or if there is no data channel created.
+     */
+    sendEndpointStatsMessage(payload) {
+        this._send({
+            colibriClass: 'EndpointStats',
+            ...payload
+        });
+    }
+
+    /**
      * Sends message via the channel.
      * @param {string} to The id of the endpoint that should receive the
      * message. If "" the message will be sent to all participants.
@@ -248,6 +260,19 @@ export default class BridgeChannel {
     }
 
     /**
+     * Sends a 'VideoTypeMessage' message via the bridge channel.
+     *
+     * @param {string} videoType 'camera', 'desktop' or 'none'.
+     */
+    sendVideoTypeMessage(videoType) {
+        logger.debug(`Sending VideoTypeMessage with video type as ${videoType}`);
+        this._send({
+            colibriClass: 'VideoTypeMessage',
+            videoType
+        });
+    }
+
+    /**
      * Set events on the given RTCDataChannel or WebSocket instance.
      */
     _handleChannel(channel) {
@@ -307,6 +332,11 @@ export default class BridgeChannel {
             }
             case 'EndpointMessage': {
                 emitter.emit(RTCEvents.ENDPOINT_MESSAGE_RECEIVED, obj.from, obj.msgPayload);
+
+                break;
+            }
+            case 'EndpointStats': {
+                emitter.emit(RTCEvents.ENDPOINT_STATS_RECEIVED, obj.from, obj);
 
                 break;
             }

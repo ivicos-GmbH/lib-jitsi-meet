@@ -10,6 +10,7 @@ import XMPPEvents from '../../service/xmpp/XMPPEvents';
 import GlobalOnErrorHandler from '../util/GlobalOnErrorHandler';
 import Listenable from '../util/Listenable';
 
+import AVModeration from './AVModeration';
 import Lobby from './Lobby';
 import XmppConnection from './XmppConnection';
 import Moderator from './moderator';
@@ -115,6 +116,7 @@ export default class ChatRoom extends Listenable {
         this.roomjid = Strophe.getBareJidFromJid(jid);
         this.myroomjid = jid;
         this.password = password;
+        this.replaceParticipant = false;
         logger.info(`Joined MUC as ${this.myroomjid}`);
         this.members = {};
         this.presMap = {};
@@ -133,6 +135,7 @@ export default class ChatRoom extends Listenable {
         if (typeof this.options.enableLobby === 'undefined' || this.options.enableLobby) {
             this.lobby = new Lobby(this);
         }
+        this.avModeration = new AVModeration(this);
         this.initPresenceMap(options);
         this.lastPresences = {};
         this.phoneNumber = null;
@@ -161,11 +164,6 @@ export default class ChatRoom extends Listenable {
             });
         }
 
-        // We need to broadcast 'videomuted' status from the beginning, cause
-        // Jicofo makes decisions based on that. Initialize it with 'false'
-        // here.
-        this.addVideoInfoToPresence(false);
-
         if (options.deploymentInfo && options.deploymentInfo.userRegion) {
             this.presMap.nodes.push({
                 'tagName': 'region',
@@ -185,8 +183,9 @@ export default class ChatRoom extends Listenable {
      * @returns {Promise} - resolved when join completes. At the time of this
      * writing it's never rejected.
      */
-    join(password) {
+    join(password, replaceParticipant) {
         this.password = password;
+        this.replaceParticipant = replaceParticipant;
 
         return new Promise(resolve => {
             this.options.disableFocus
@@ -229,6 +228,10 @@ export default class ChatRoom extends Listenable {
         // be considered as joining, and server can send us the message history
         // for the room on every presence
         if (fromJoin) {
+            if (this.replaceParticipant) {
+                pres.c('flip_device').up();
+            }
+
             pres.c('x', { xmlns: this.presMap.xns });
 
             if (this.password) {
@@ -436,6 +439,9 @@ export default class ChatRoom extends Listenable {
         const mucUserItem
             = xElement && xElement.getElementsByTagName('item')[0];
 
+        member.isReplaceParticipant
+            = pres.getElementsByTagName('flip_device').length;
+
         member.affiliation
             = mucUserItem && mucUserItem.getAttribute('affiliation');
         member.role = mucUserItem && mucUserItem.getAttribute('role');
@@ -600,7 +606,8 @@ export default class ChatRoom extends Listenable {
                     member.identity,
                     member.botType,
                     member.jid,
-                    member.features);
+                    member.features,
+                    member.isReplaceParticipant);
 
                 // we are reporting the status with the join
                 // so we do not want a second event about status update
@@ -841,9 +848,8 @@ export default class ChatRoom extends Listenable {
      * Send text message to the other participants in the conference
      * @param message
      * @param elementName
-     * @param nickname
      */
-    sendMessage(message, elementName, nickname) {
+    sendMessage(message, elementName) {
         const msg = $msg({ to: this.roomjid,
             type: 'groupchat' });
 
@@ -851,17 +857,11 @@ export default class ChatRoom extends Listenable {
         // is different from 'body', we add a custom namespace.
         // e.g. for 'json-message' extension of message stanza.
         if (elementName === 'body') {
-            msg.c(elementName, message).up();
+            msg.c(elementName, {}, message);
         } else {
-            msg.c(elementName, { xmlns: 'http://jitsi.org/jitmeet' }, message)
-                .up();
+            msg.c(elementName, { xmlns: 'http://jitsi.org/jitmeet' }, message);
         }
-        if (nickname) {
-            msg.c('nick', { xmlns: 'http://jabber.org/protocol/nick' })
-                .t(nickname)
-                .up()
-                .up();
-        }
+
         this.connection.send(msg);
         this.eventEmitter.emit(XMPPEvents.SENDING_CHAT_MESSAGE, message);
     }
@@ -872,9 +872,8 @@ export default class ChatRoom extends Listenable {
      * @param id id/muc resource of the receiver
      * @param message
      * @param elementName
-     * @param nickname
      */
-    sendPrivateMessage(id, message, elementName, nickname) {
+    sendPrivateMessage(id, message, elementName) {
         const msg = $msg({ to: `${this.roomjid}/${id}`,
             type: 'chat' });
 
@@ -885,12 +884,6 @@ export default class ChatRoom extends Listenable {
             msg.c(elementName, message).up();
         } else {
             msg.c(elementName, { xmlns: 'http://jitsi.org/jitmeet' }, message)
-                .up();
-        }
-        if (nickname) {
-            msg.c('nick', { xmlns: 'http://jabber.org/protocol/nick' })
-                .t(nickname)
-                .up()
                 .up();
         }
 
@@ -975,12 +968,12 @@ export default class ChatRoom extends Listenable {
                         + '>status[code="307"]')
                 .length;
         const membersKeys = Object.keys(this.members);
+        const isReplaceParticipant = $(pres).find('flip_device').length;
 
         if (isKick) {
             const actorSelect
                 = $(pres)
                 .find('>x[xmlns="http://jabber.org/protocol/muc#user"]>item>actor');
-
             let actorNick;
 
             if (actorSelect.length) {
@@ -1005,7 +998,8 @@ export default class ChatRoom extends Listenable {
                 isSelfPresence,
                 actorNick,
                 Strophe.getResourceFromJid(from),
-                reason);
+                reason,
+                isReplaceParticipant);
         }
 
         if (isSelfPresence) {
@@ -1037,11 +1031,6 @@ export default class ChatRoom extends Listenable {
      * @param from
      */
     onMessage(msg, from) {
-        const nick
-            = $(msg).find('>nick[xmlns="http://jabber.org/protocol/nick"]')
-                .text()
-            || Strophe.getResourceFromJid(from);
-
         const type = msg.getAttribute('type');
 
         if (type === 'error') {
@@ -1118,10 +1107,10 @@ export default class ChatRoom extends Listenable {
         if (txt) {
             if (type === 'chat') {
                 this.eventEmitter.emit(XMPPEvents.PRIVATE_MESSAGE_RECEIVED,
-                        from, nick, txt, this.myroomjid, stamp);
+                        from, txt, this.myroomjid, stamp);
             } else if (type === 'groupchat') {
                 this.eventEmitter.emit(XMPPEvents.MESSAGE_RECEIVED,
-                        from, nick, txt, this.myroomjid, stamp);
+                        from, txt, this.myroomjid, stamp);
             }
         }
     }
@@ -1303,7 +1292,16 @@ export default class ChatRoom extends Listenable {
                         .up()
                         .up();
 
-                    this.connection.sendIQ(formsubmit, onSuccess, onError);
+                    this.connection.sendIQ(
+                        formsubmit,
+                        () => {
+
+                            // we set the password in chat room so we can use it
+                            // later when dialing out
+                            this.password = key;
+                            onSuccess();
+                        },
+                        onError);
                 } else {
                     onNotSupported();
                 }
@@ -1394,9 +1392,23 @@ export default class ChatRoom extends Listenable {
 
     /**
      * Adds the key to the presence map, overriding any previous value.
+     * This method is used by jibri.
+     *
      * @param key The key to add or replace.
      * @param values The new values.
      * @returns {boolean|null} <tt>true</tt> if the operation succeeded or <tt>false</tt> when no add or replce was
+     * performed as the value was already there.
+     * @deprecated Use 'addOrReplaceInPresence' instead. TODO: remove it from here and jibri.
+     */
+    addToPresence(key, values) {
+        return this.addOrReplaceInPresence(key, values);
+    }
+
+    /**
+     * Adds the key to the presence map, overriding any previous value.
+     * @param key The key to add or replace.
+     * @param values The new values.
+     * @returns {boolean|null} <tt>true</tt> if the operation succeeded or <tt>false</tt> when no add or replace was
      * performed as the value was already there.
      */
     addOrReplaceInPresence(key, values) {
@@ -1539,10 +1551,16 @@ export default class ChatRoom extends Listenable {
      * @param mute
      */
     addAudioInfoToPresence(mute) {
+        const audioMutedTagName = 'audiomuted';
+
+        // we skip adding it as muted is default value
+        if (mute && !this.getFromPresence(audioMutedTagName)) {
+            return false;
+        }
+
         return this.addOrReplaceInPresence(
-            'audiomuted',
+            audioMutedTagName,
             {
-                attributes: { 'xmlns': 'http://jitsi.org/jitmeet/audio' },
                 value: mute.toString()
             });
     }
@@ -1565,10 +1583,16 @@ export default class ChatRoom extends Listenable {
      * @param mute
      */
     addVideoInfoToPresence(mute) {
+        const videoMutedTagName = 'videomuted';
+
+        // we skip adding it as muted is default value
+        if (mute && !this.getFromPresence(videoMutedTagName)) {
+            return false;
+        }
+
         return this.addOrReplaceInPresence(
-            'videomuted',
+            videoMutedTagName,
             {
-                attributes: { 'xmlns': 'http://jitsi.org/jitmeet/video' },
                 value: mute.toString()
             });
     }
@@ -1667,6 +1691,14 @@ export default class ChatRoom extends Listenable {
     getLobby() {
         return this.lobby;
     }
+
+    /**
+     * @returns {AVModeration}
+     */
+    getAVModeration() {
+        return this.avModeration;
+    }
+
 
     /**
      * Returns the phone number for joining the conference.
